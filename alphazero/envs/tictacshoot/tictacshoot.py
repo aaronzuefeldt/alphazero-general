@@ -6,7 +6,8 @@ import numpy as np
 from alphazero.Game import GameState
 
 # Import the user's custom board logic (same directory as this file when used together)
-from tictacshootLogic import Board as _CustomBoard
+from alphazero.envs.tictacshoot.tictacshootLogic import Board as _CustomBoard
+
 
 
 def _encode_board(b: _CustomBoard) -> np.ndarray:
