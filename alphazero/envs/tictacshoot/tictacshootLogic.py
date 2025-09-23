@@ -1,4 +1,4 @@
-# tictactoe/CustomTicTacToeLogic_sliding.py
+# tictactoe/tictacshootLogic_sliding.py
 
 import numpy as np
 

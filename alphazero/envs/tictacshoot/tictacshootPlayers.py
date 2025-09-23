@@ -1,4 +1,4 @@
-# tictactoe/CustomTicTacToePlayers.py
+# tictactoe/tictacshootPlayers.py
 
 import numpy as np
 

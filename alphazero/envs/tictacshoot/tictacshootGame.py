@@ -1,13 +1,13 @@
-# tictactoe/CustomTicTacToeGame.py
+# tictactoe/tictacshootGame.py
 
 from __future__ import print_function
 import sys
 sys.path.append('..')
 from Game import Game
-from .CustomTicTacToeLogic import Board
+from .tictacshootLogic import Board
 import numpy as np
 
-class CustomTicTacToeGame(Game):
+class tictacshootGame(Game):
     """
     Game class implementation for the custom C++ Tic-Tac-Toe variant.
     It wraps the Board logic into the API required by the AlphaZero framework.
