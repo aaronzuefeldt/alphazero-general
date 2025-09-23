@@ -1,0 +1,5 @@
+numpy<1.25
+Cython<3.1
+choix<0.4
+PySide2<5.16
+six<1.17
