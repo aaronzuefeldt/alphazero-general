@@ -205,9 +205,9 @@ cdef class Board:
 
     cpdef void execute_move(self, int move_idx, int player):
         cdef int SPECIAL_BASE = 8 * self.n * self.n
+        cdef int p, mod, r, c
         if 0 <= move_idx < SPECIAL_BASE:
             # PLACE: move encodes orientation p and square (r,c)
-            cdef int p, mod, r, c
             p, mod = divmod(move_idx, self.n * self.n)
             r, c = divmod(mod, self.n)
             assert self.pieces[r, c] == 0 and not self.has_placed
