@@ -404,6 +404,40 @@ cdef class Board:
             self.rotations[orr, occ] = 0
             self.has_shield_states[orr, occ] = 0
 
+    # ---------------------- Pickling support ----------------------
+    def __getstate__(self):
+        return {
+            "n": int(self.n),
+            "pieces": self.pieces,
+            "rotations": self.rotations,
+            "has_shield_states": self.has_shield_states,
+            "token_row": int(self.token_row),
+            "token_column": int(self.token_column),
+            "token_active": bool(self.token_active),
+            "turn_number": int(self.turn_number),
+            "actions_left": int(self.actions_left),
+            "has_placed": bool(self.has_placed),
+            "last_placed": self.last_placed,
+        }
+
+    def __setstate__(self, state):
+        import numpy as _np
+        self.n = int(state["n"])
+        self.pieces = _np.array(state["pieces"], dtype=_np.int32, copy=True)
+        self.rotations = _np.array(state["rotations"], dtype=_np.int32, copy=True)
+        self.has_shield_states = _np.array(state["has_shield_states"], dtype=_np.int32, copy=True)
+        self.token_row = int(state["token_row"])
+        self.token_column = int(state["token_column"])
+        self.token_active = bool(state["token_active"])
+        self.turn_number = int(state["turn_number"])
+        self.actions_left = int(state["actions_left"])
+        self.has_placed = bool(state["has_placed"])
+        self.last_placed = tuple(state["last_placed"]) if state["last_placed"] is not None else None
+
+    def __reduce__(self):
+        # Recreate via constructor arg (n) and full state
+        return (Board, (int(self.n),), self.__getstate__())
+
     # ---------------------- Helpers ----------------------
     def _in_bounds(self, int r, int c):
         return 0 <= r < self.n and 0 <= c < self.n
