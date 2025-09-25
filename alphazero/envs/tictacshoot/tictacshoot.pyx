@@ -26,48 +26,48 @@ cdef int NUM_PLAYERS = 2
 cdef int NUM_CHANNELS = 7
 cdef int BOARD_SIZE = 3
 
-cdef tuple DIRECTIONS = (
-    (0, 1), (1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1)
-)
-
 # -----------------------------------------------------------------------------
 # C-level Board implementation for performance
 # -----------------------------------------------------------------------------
 
+
+# Use a module-level constant (Python object) for directions
+DIRECTIONS = (
+    (0, 1),    # 0: Right (→)
+    (1, 1),    # 1: Down-Right (↘)
+    (1, 0),    # 2: Down (↓)
+    (1, -1),   # 3: Down-Left (↙)
+    (0, -1),   # 4: Left (←)
+    (-1, -1),  # 5: Up-Left (↖)
+    (-1, 0),   # 6: Up (↑)
+    (-1, 1),   # 7: Up-Right (↗)
+)
+
 cdef class Board:
     """
-    Custom Tic-Tac-Toe (with spin/shoot/slide) board logic in Cython-friendly Python.
+    Custom Tic-Tac-Toe (with spin/shoot/slide) board logic.
 
     Action space (for n=3): 72 placement actions (8 rotations × 9 squares)
-    plus 3 special actions: 72=SPIN, 73=SHOOT, 74=END_TURN.
+    plus 3 specials: 72=SPIN, 73=SHOOT, 74=END_TURN.
     """
-
-    # rotation index -> (dr, dc)
-    DIRECTIONS = [
-        (0, 1),   # 0: Right (→)
-        (1, 1),   # 1: Down-Right (↘)
-        (1, 0),   # 2: Down (↓)
-        (1, -1),  # 3: Down-Left (↙)
-        (0, -1),  # 4: Left (←)
-        (-1, -1), # 5: Up-Left (↖)
-        (-1, 0),  # 6: Up (↑)
-        (-1, 1)   # 7: Up-Right (↗)
-    ]
+    cdef public int n
+    cdef object pieces           # np.ndarray[int32]
+    cdef object rotations        # np.ndarray[int32]
+    cdef object has_shield_states# np.ndarray[int32]
+    cdef public int token_row, token_column
+    cdef public bint token_active
+    cdef public int turn_number, actions_left
+    cdef public bint has_placed
+    cdef object last_placed      # (r,c) or None
 
     def __cinit__(self, int n=3):
         self.n = n
+        self.pieces = np.zeros((n, n), dtype=np.int32)          # 1, -1, or 0
+        self.rotations = np.zeros((n, n), dtype=np.int32)       # 0..7 where piece exists
+        self.has_shield_states = np.zeros((n, n), dtype=np.int32)  # 1 has shield, 0 none
 
-        # Piece grid: 1 for Player O, -1 for Player X, 0 empty
-        self.pieces = np.zeros((n, n), dtype=np.int32)
-
-        # Rotations per cell (0..7) where a piece exists
-        self.rotations = np.zeros((n, n), dtype=np.int32)
-
-        # Shield presence per cell: 1 has shield, 0 no shield
-        self.has_shield_states = np.zeros((n, n), dtype=np.int32)
-
-        # Special token starts at (2,1) as -1 piece, active at game start
-        token_index = 7  # 0..8 for n=3 -> (2,1)
+        # Token starts at (2,1) as -1 and is active
+        cdef int token_index = 7
         self.token_row, self.token_column = divmod(token_index, n)
         self.pieces[self.token_row, self.token_column] = -1
         self.token_active = True
@@ -76,55 +76,44 @@ cdef class Board:
         self.turn_number = 0
         self.actions_left = 2
         self.has_placed = False
-        self.last_placed = None  # (r,c) or None
+        self.last_placed = None
 
     # ---------------------- Rules / API ----------------------
     def get_legal_moves(self, int player):
-        """
-        Returns list[int] of all legal moves:
-        - 0..(8*n*n - 1): placement p*(n*n) + (r*n + c)
-        - 8*n*n:     SPIN  (rot +1 mod 8)  [costs 1 action]
-        - 8*n*n + 1: SHOOT (project rays)  [costs 1 action]
-        - 8*n*n + 2: END_TURN (switches player) — allowed if placed or board is full
-        """
+        cdef int n = self.n
+        cdef int SPECIAL_BASE = 8 * n * n
         moves = []
-        n = self.n
-        SPECIAL_BASE = 8 * n * n
 
-        # 1) Placement (only if not already placed this turn)
         if not self.has_placed:
             for p in range(8):
+                base = p * (n * n)
                 for r in range(n):
+                    rn = r * n
                     for c in range(n):
                         if self.pieces[r, c] == 0:
-                            moves.append(p * (n * n) + (r * n + c))
+                            moves.append(base + rn + c)
 
-        # 2) AP-gated actions
         if self.actions_left > 0:
-            # SPIN possible if there's at least one non-token piece (or token inactive)
             if np.count_nonzero(self.pieces) > 1 or (np.count_nonzero(self.pieces) == 1 and not self.token_active):
-                moves.append(SPECIAL_BASE)  # SPIN
-
-            # SHOOT if there is any valid target along any shooter's ray
+                moves.append(SPECIAL_BASE)      # SPIN
             if self._has_valid_targets(player):
                 moves.append(SPECIAL_BASE + 1)  # SHOOT
 
-        # 3) Always allow END_TURN after placing or if board is full
         if self.has_placed or np.count_nonzero(self.pieces) == n * n:
-            moves.append(SPECIAL_BASE + 2)
+            moves.append(SPECIAL_BASE + 2)      # END_TURN
 
         return moves
 
     def _has_valid_targets(self, int player):
-        n = self.n
+        cdef int n = self.n
+        cdef int dir_idx, r, c, r0, c0, dr, dc
         for r0 in range(n):
             for c0 in range(n):
                 if self.pieces[r0, c0] == player and self.last_placed != (r0, c0):
-                    # Active token cannot shoot
                     if self.token_active and r0 == self.token_row and c0 == self.token_column:
                         continue
                     dir_idx = int(self.rotations[r0, c0])
-                    dr, dc = self.DIRECTIONS[dir_idx]
+                    dr, dc = DIRECTIONS[dir_idx]
                     r, c = r0 + dr, c0 + dc
                     while self._in_bounds(r, c):
                         if self.pieces[r, c] != 0:
@@ -133,12 +122,6 @@ cdef class Board:
         return False
 
     def check_win(self, int win_len=3):
-        """
-        Standard k-in-a-row check for either player.
-        Returns  1 if Player O wins,
-                -1 if Player X wins,
-                 0 otherwise.
-        """
         board = self.pieces
         m, n = board.shape
         k = int(win_len)
@@ -201,29 +184,21 @@ cdef class Board:
         return 0
 
     def execute_move(self, int move_idx, int player):
-        """
-        Apply a move:
-        - Placement encodes rotation + cell
-        - Special actions: SPIN, SHOOT, END_TURN
-        """
-        n = self.n
-        SPECIAL_BASE = 8 * n * n
-
+        cdef int n = self.n
+        cdef int SPECIAL_BASE = 8 * n * n
         if 0 <= move_idx < SPECIAL_BASE:
-            # PLACE
             p, mod = divmod(move_idx, n * n)
             r, c = divmod(mod, n)
             if self.pieces[r, c] != 0 or self.has_placed:
                 raise AssertionError("Illegal placement")
             self.pieces[r, c] = player
-            self.has_shield_states[r, c] = 1   # new piece spawns with shield
+            self.has_shield_states[r, c] = 1
             self.rotations[r, c] = p
             self.has_placed = True
             self.last_placed = (r, c)
             return
 
         if move_idx == SPECIAL_BASE:
-            # SPIN (rot +1) — costs 1 AP
             if self.actions_left <= 0:
                 raise AssertionError("No actions left for SPIN")
             self.rotations = (self.rotations + 1) % 8
@@ -231,7 +206,6 @@ cdef class Board:
             return
 
         if move_idx == SPECIAL_BASE + 1:
-            # SHOOT — costs 1 AP
             if self.actions_left <= 0:
                 raise AssertionError("No actions left for SHOOT")
             self.shoot(player)
@@ -245,30 +219,22 @@ cdef class Board:
         self.last_placed = None
 
     def shoot(self, int player):
-        """
-        Fire rays from all of `player`'s pieces (except the most recently placed
-        and the active special token). First non-empty cell along each ray is a hit.
-        If a hit piece has no shield, it is removed. If it has a shield, it slides.
-        """
         if self.actions_left <= 0:
             return
+        cdef int n = self.n
+        hits = {}  # (r,c) -> dir_idx
+        cdef int r0, c0, dir_idx, dr, dc, r, c
 
-        n = self.n
-
-        # 1) Collect first hits per ray
-        hits = {}  # (r,c) -> dir_idx that hit it
         for r0 in range(n):
             for c0 in range(n):
                 if self.pieces[r0, c0] == player and self.last_placed != (r0, c0):
-                    # Token cannot shoot while active
                     if self.token_active and r0 == self.token_row and c0 == self.token_column:
                         continue
                     dir_idx = int(self.rotations[r0, c0])
-                    dr, dc = self.DIRECTIONS[dir_idx]
+                    dr, dc = DIRECTIONS[dir_idx]
                     r, c = r0 + dr, c0 + dc
                     while self._in_bounds(r, c):
                         if self.pieces[r, c] != 0:
-                            # keep first shooter direction only
                             hits.setdefault((r, c), dir_idx)
                             break
                         r += dr; c += dc
@@ -276,21 +242,18 @@ cdef class Board:
         if not hits:
             return
 
-        # 2) Partition: die (no shield) vs slide (has shield)
         will_die = set()
-        will_slide = {}  # (r,c) -> dir_idx
+        will_slide = {}
         for (r, c), dir_idx in hits.items():
             if self.has_shield_states[r, c] == 0:
                 will_die.add((r, c))
             else:
                 will_slide[(r, c)] = dir_idx
 
-        # 2b) Deactivate token if it gets destroyed
         if (self.token_row, self.token_column) in will_die:
             self.token_active = False
 
-        # 3) Plan slide destinations per target
-        slide_targets = {}  # dest_idx -> list[[origin_idx, prev_idx, dist], ...]
+        slide_targets = {}
 
         def rc_to_idx(r, c): return r * n + c
         def idx_to_rc(idx): return divmod(idx, n)
@@ -298,26 +261,19 @@ cdef class Board:
         def plan_slide_from(rc, hit_dir_idx):
             r0, c0 = rc
             origin_idx = rc_to_idx(r0, c0)
+            dr, dc = DIRECTIONS[hit_dir_idx]
+            slide_vec = [dc, -dr]
 
-            # Map the hit direction to a screen-space vector (x, y) for rotation logic
-            dr, dc = self.DIRECTIONS[hit_dir_idx]
-            slide_vec = [dc, -dr]  # (x, y) with inverted y to mimic C# coords
-
-            # Up to 3 attempts: original, +90°, +180° (cumulative from +90°)
             for attempt in range(3):
                 if attempt == 1:
-                    # +90° clockwise
-                    slide_vec = [slide_vec[1], -slide_vec[0]]
+                    slide_vec[:] = [slide_vec[1], -slide_vec[0]]
                 elif attempt == 2:
-                    # +180° from previous (+270° total from original)
-                    slide_vec = [-slide_vec[0], -slide_vec[1]]
+                    slide_vec[:] = [-slide_vec[0], -slide_vec[1]]
 
                 j = 1
                 while j < n:
                     rr = r0 + (-slide_vec[1]) * j
                     cc = c0 + slide_vec[0] * j
-
-                    # Blocked by board or by a non-dying piece
                     if (not self._in_bounds(rr, cc) or
                         (self.pieces[rr, cc] != 0 and (rr, cc) not in will_die)):
                         if j > 1:
@@ -330,19 +286,16 @@ cdef class Board:
                             slide_targets.setdefault(dest_idx, []).append([origin_idx, prev_idx, j])
                             return dest_idx
                         else:
-                            # immediate block — try next rotation attempt
                             break
                     else:
                         j += 1
 
-            # No valid slide — stay; shield still consumed
             slide_targets.setdefault(origin_idx, []).append([origin_idx, origin_idx, 0])
             return origin_idx
 
         for rc, d in will_slide.items():
             plan_slide_from(rc, d)
 
-        # 4) Resolve overlapping destinations with backoff/tie rules
         max_iters = n * n
         it = 0
         while it < max_iters:
@@ -351,9 +304,8 @@ cdef class Board:
             for dest_idx, contenders in list(slide_targets.items()):
                 if len(contenders) > 1:
                     overlaps += 1
-                    contenders.sort(key=lambda x: x[2])  # by distance asc
+                    contenders.sort(key=lambda x: x[2])
                     if len(contenders) >= 2 and contenders[0][2] == contenders[1][2]:
-                        # Tie: all back off one step
                         for origin_idx, prev_idx, dist in contenders:
                             if dist > 0:
                                 new_dest = prev_idx
@@ -364,7 +316,6 @@ cdef class Board:
                                 slide_targets.setdefault(origin_idx, []).append([origin_idx, origin_idx, 0])
                         slide_targets[dest_idx] = []
                     else:
-                        # Winner stays (closest). Others back off one.
                         winner = contenders[0]
                         losers = contenders[1:]
                         slide_targets[dest_idx] = [winner]
@@ -379,13 +330,11 @@ cdef class Board:
             if overlaps == 0:
                 break
 
-        # 5) Apply removals
         for (r, c) in will_die:
             self.pieces[r, c] = 0
             self.rotations[r, c] = 0
             self.has_shield_states[r, c] = 0
 
-        # 6) Apply slides (move piece & consume shield)
         for dest_idx, contenders in slide_targets.items():
             if len(contenders) != 1:
                 continue
@@ -399,7 +348,7 @@ cdef class Board:
             drr, dcc = idx_to_rc(dest_idx)
             self.pieces[drr, dcc] = self.pieces[orr, occ]
             self.rotations[drr, dcc] = self.rotations[orr, occ]
-            self.has_shield_states[drr, dcc] = 0  # shield consumed
+            self.has_shield_states[drr, dcc] = 0
             self.pieces[orr, occ] = 0
             self.rotations[orr, occ] = 0
             self.has_shield_states[orr, occ] = 0
@@ -435,13 +384,11 @@ cdef class Board:
         self.last_placed = tuple(state["last_placed"]) if state["last_placed"] is not None else None
 
     def __reduce__(self):
-        # Recreate via constructor arg (n) and full state
         return (Board, (int(self.n),), self.__getstate__())
 
     # ---------------------- Helpers ----------------------
-    def _in_bounds(self, int r, int c):
+    cdef bint _in_bounds(self, int r, int c):
         return 0 <= r < self.n and 0 <= c < self.n
-
 
 # -----------------------------------------------------------------------------
 # Python-level Game class for API compatibility
