@@ -85,7 +85,7 @@ cdef class Board:
         new_board.token_column = self.token_column
         return new_board
 
-    # ... other Board methods like get_legal_moves, check_win, execute_move ...
+    # ---------------------- Rules / API ----------------------
     cpdef list get_legal_moves(self, int player):
         cdef list moves = []
         cdef int p, r, c
@@ -98,17 +98,302 @@ cdef class Board:
                             moves.append(p * (self.n * self.n) + (r * self.n + c))
         if self.actions_left > 0:
             if np.count_nonzero(self.pieces) > 1 or (np.count_nonzero(self.pieces) == 1 and not self.token_active):
-                moves.append(SPECIAL_BASE)
+                moves.append(SPECIAL_BASE)  # SPIN
             if self._has_valid_targets(player):
-                moves.append(SPECIAL_BASE + 1)
+                moves.append(SPECIAL_BASE + 1)  # SHOOT
         if self.has_placed or np.count_nonzero(self.pieces) == self.n * self.n:
-            moves.append(SPECIAL_BASE + 2)
+            moves.append(SPECIAL_BASE + 2)  # END_TURN
         return moves
-    cdef bint _has_valid_targets(self, int player): return False # dummy
-    cpdef int check_win(self, int win_len=3): return 0 # dummy
-    cpdef void execute_move(self, int move_idx, int player): pass # dummy
-    cdef void shoot(self, int player): pass # dummy
-    cdef bint _in_bounds(self, int r, int c): return 0 <= r < self.n and 0 <= c < self.n
+
+    cdef bint _has_valid_targets(self, int player):
+        """Checks whether a SHOOT would hit anything (first occupied square along any ray)."""
+        cdef int r0, c0, r, c, rot
+        cdef int dr, dc
+        for r0 in range(self.n):
+            for c0 in range(self.n):
+                if self.pieces[r0, c0] == player and (self.last_placed is None or (r0, c0) != self.last_placed):
+                    if self.token_active and r0 == self.token_row and c0 == self.token_column:
+                        continue
+                    rot = <int> self.rotations[r0, c0]
+                    dr, dc = <int> DIRECTIONS[rot][0], <int> DIRECTIONS[rot][1]
+                    r, c = r0 + dr, c0 + dc
+                    while self._in_bounds(r, c):
+                        if self.pieces[r, c] != 0:
+                            return True
+                        r += dr; c += dc
+        return False
+
+    cpdef int check_win(self, int win_len=3):
+        """Return 1 if player 1 wins, -1 if player -1 wins, else 0."""
+        cdef int m = self.n
+        cdef int n = self.n
+        cdef int k = win_len
+        if k <= 0:
+            raise ValueError("win_len must be a positive integer.")
+        if k > m and k > n:
+            return 0
+
+        cdef int player
+        for player in (1, -1):
+            # Horizontal
+            cdef int r, c, count
+            for r in range(m):
+                count = 0
+                for c in range(n):
+                    if self.pieces[r, c] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+            # Vertical
+            for c in range(n):
+                count = 0
+                for r in range(m):
+                    if self.pieces[r, c] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+            # Diagonal ↘ (down-right)
+            cdef int r0, c0, rr, cc
+            for r0 in range(m):
+                rr, cc = r0, 0
+                count = 0
+                while rr < m and cc < n:
+                    if self.pieces[rr, cc] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+                    rr += 1; cc += 1
+            for c0 in range(1, n):
+                rr, cc = 0, c0
+                count = 0
+                while rr < m and cc < n:
+                    if self.pieces[rr, cc] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+                    rr += 1; cc += 1
+            # Diagonal ↙ (down-left)
+            for r0 in range(m):
+                rr, cc = r0, n - 1
+                count = 0
+                while rr < m and cc >= 0:
+                    if self.pieces[rr, cc] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+                    rr += 1; cc -= 1
+            for c0 in range(n - 2, -1, -1):
+                rr, cc = 0, c0
+                count = 0
+                while rr < m and cc >= 0:
+                    if self.pieces[rr, cc] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+                    rr += 1; cc -= 1
+        return 0
+
+    cpdef void execute_move(self, int move_idx, int player):
+        cdef int SPECIAL_BASE = 8 * self.n * self.n
+        if 0 <= move_idx < SPECIAL_BASE:
+            # PLACE: move encodes orientation p and square (r,c)
+            cdef int p, mod, r, c
+            p, mod = divmod(move_idx, self.n * self.n)
+            r, c = divmod(mod, self.n)
+            assert self.pieces[r, c] == 0 and not self.has_placed
+            self.pieces[r, c] = player
+            self.has_shield_states[r, c] = 1
+            self.rotations[r, c] = p
+            self.has_placed = True
+            self.last_placed = (r, c)
+        elif move_idx == SPECIAL_BASE:
+            # SPIN
+            assert self.actions_left > 0
+            self.rotations = (self.rotations + 1) % 8
+            self.actions_left -= 1
+        elif move_idx == SPECIAL_BASE + 1:
+            # SHOOT
+            assert self.actions_left > 0
+            self.shoot(player)
+            self.actions_left -= 1
+        else:
+            # END_TURN
+            self.turn_number += 1
+            self.actions_left = 2
+            self.has_placed = False
+            self.last_placed = None
+
+    cdef void shoot(self, int player):
+        """Ray-cast hits, then resolve shielded slides with conflict back-offs."""
+        if self.actions_left <= 0:
+            return
+
+        cdef dict hits = {}
+        cdef int r0, c0, r, c, rot, dr, dc
+        # 1) collect first hits per ray from every eligible shooter
+        for r0 in range(self.n):
+            for c0 in range(self.n):
+                if self.pieces[r0, c0] == player and (self.last_placed is None or (r0, c0) != self.last_placed):
+                    if self.token_active and r0 == self.token_row and c0 == self.token_column:
+                        continue
+                    rot = <int> self.rotations[r0, c0]
+                    dr, dc = <int> DIRECTIONS[rot][0], <int> DIRECTIONS[rot][1]
+                    r, c = r0 + dr, c0 + dc
+                    while self._in_bounds(r, c):
+                        if self.pieces[r, c] != 0:
+                            if (r, c) not in hits:
+                                hits[(r, c)] = rot
+                            break
+                        r += dr; c += dc
+
+        if not hits:
+            return
+
+        # 2) classify: dies without shield; else slides (shield consumed)
+        cdef object will_die = set()
+        cdef dict will_slide = {}
+        for (r, c), dir_idx in hits.items():
+            if self.has_shield_states[r, c] == 0:
+                will_die.add((r, c))
+            else:
+                will_slide[(r, c)] = dir_idx
+
+        # token deactivates if it dies
+        if (self.token_row, self.token_column) in will_die:
+            self.token_active = False
+
+        # 3) plan sliding destinations with up to 3 rotated directions
+        cdef dict slide_targets = {}
+
+        cdef int n = self.n
+        cdef int origin_idx, rr, cc, rr2, cc2, rr3, cc3
+        cdef int rotation_attempt, j
+        cdef int hit_dir_idx
+        cdef int dest_idx, prev_idx
+
+        def rc_to_idx(int r, int c):
+            return r * n + c
+        def idx_to_rc(int idx):
+            return divmod(idx, n)
+
+        def plan_slide_from(rc, hit_dir_idx):
+            nonlocal slide_targets
+            r0, c0 = rc
+            origin_idx = rc_to_idx(r0, c0)
+            # convert ray dir to screen-space vector then to slide vector
+            dr, dc = DIRECTIONS[hit_dir_idx]
+            cdef list slide_dir = [dc, -dr]  # [x, y] with y flipped
+            for rotation_attempt in range(3):
+                if rotation_attempt == 1:
+                    slide_dir = [slide_dir[1], -slide_dir[0]]  # +90°
+                elif rotation_attempt == 2:
+                    slide_dir = [-slide_dir[0], -slide_dir[1]]  # +180° from prior (total +270°)
+                j = 1
+                while j < n:
+                    rr = r0 + (-slide_dir[1]) * j
+                    cc = c0 + slide_dir[0] * j
+                    if (not self._in_bounds(rr, cc)) or (self.pieces[rr, cc] != 0 and (rr, cc) not in will_die):
+                        if j > 1:
+                            rr2 = r0 + (-slide_dir[1]) * (j - 1)
+                            cc2 = c0 + slide_dir[0] * (j - 1)
+                            rr3 = r0 + (-slide_dir[1]) * (j - 2)
+                            cc3 = c0 + slide_dir[0] * (j - 2)
+                            dest_idx = rc_to_idx(rr2, cc2)
+                            prev_idx = rc_to_idx(rr3, cc3)
+                            slide_targets.setdefault(dest_idx, []).append([origin_idx, prev_idx, j])
+                            return dest_idx
+                        else:
+                            break
+                    else:
+                        j += 1
+            # no move possible -> consume shield but stay
+            slide_targets.setdefault(origin_idx, []).append([origin_idx, origin_idx, 0])
+            return origin_idx
+
+        for rc, hit_dir_idx in will_slide.items():
+            plan_slide_from(rc, hit_dir_idx)
+
+        # 4) resolve overlaps with back-offs
+        cdef int max_iterations = n * n
+        cdef int iteration = 0
+        cdef int overlaps
+        cdef list contenders, new_contenders
+        cdef object item
+        cdef int step, new_dest, new_prev, dist
+        cdef int oidx, pidx
+        while iteration < max_iterations:
+            iteration += 1
+            overlaps = 0
+            for dest_idx in list(slide_targets.keys()):
+                contenders = slide_targets.get(dest_idx, [])
+                if len(contenders) > 1:
+                    overlaps += 1
+                    contenders.sort(key=lambda x: x[2])
+                    if len(contenders) >= 2 and contenders[0][2] == contenders[1][2]:
+                        # tie: everyone backs off one cell if possible
+                        new_contenders = []
+                        for oidx, pidx, dist in contenders:
+                            if dist > 0:
+                                step = dest_idx - pidx
+                                new_dest = pidx
+                                new_prev = pidx - step
+                                slide_targets.setdefault(new_dest, []).append([oidx, new_prev, dist - 1])
+                            else:
+                                slide_targets.setdefault(oidx, []).append([oidx, oidx, 0])
+                        slide_targets[dest_idx] = []
+                    else:
+                        # winner stays, others back off
+                        winner = contenders[0]
+                        losers = contenders[1:]
+                        slide_targets[dest_idx] = [winner]
+                        for oidx, pidx, dist in losers:
+                            if dist > 0:
+                                step = dest_idx - pidx
+                                new_dest = pidx
+                                new_prev = pidx - step
+                                slide_targets.setdefault(new_dest, []).append([oidx, new_prev, dist - 1])
+                            else:
+                                slide_targets.setdefault(oidx, []).append([oidx, oidx, 0])
+            if overlaps == 0:
+                break
+
+        # 5) apply removals
+        for (r, c) in list(will_die):
+            self.pieces[r, c] = 0
+            self.rotations[r, c] = 0
+            self.has_shield_states[r, c] = 0
+
+        # 6) apply slides (shield consumed)
+        for dest_idx, contenders in slide_targets.items():
+            if len(contenders) == 1:
+                oidx, pidx, dist = contenders[0]
+                if dest_idx != oidx:
+                    rr, cc = idx_to_rc(oidx)
+                    r2, c2 = idx_to_rc(dest_idx)
+                    self.pieces[r2, c2] = self.pieces[rr, cc]
+                    self.rotations[r2, c2] = self.rotations[rr, cc]
+                    self.has_shield_states[r2, c2] = 0
+                    self.pieces[rr, cc] = 0
+                    self.rotations[rr, cc] = 0
+                    self.has_shield_states[rr, cc] = 0
+                else:
+                    rr, cc = idx_to_rc(oidx)
+                    self.has_shield_states[rr, cc] = 0
+
+    cdef bint _in_bounds(self, int r, int c):
+        return 0 <= r < self.n and 0 <= c < self.n
 
 
 # -----------------------------------------------------------------------------
@@ -266,17 +551,3 @@ cdef Board _decode_board(np.ndarray board_state, int n):
     b.turn_number = int(board_state[5, 0, 0])
     b.token_active = bool(board_state[6, 0, 0])
     return b
-    # ---------------------- Cloning ----------------------
-    def clone(self):
-        cdef Board b = Board(int(self.n))
-        b.pieces = np.array(self.pieces, dtype=np.int32, copy=True)
-        b.rotations = np.array(self.rotations, dtype=np.int32, copy=True)
-        b.has_shield_states = np.array(self.has_shield_states, dtype=np.int32, copy=True)
-        b.token_row = int(self.token_row)
-        b.token_column = int(self.token_column)
-        b.token_active = bool(self.token_active)
-        b.turn_number = int(self.turn_number)
-        b.actions_left = int(self.actions_left)
-        b.has_placed = bool(self.has_placed)
-        b.last_placed = tuple(self.last_placed) if self.last_placed is not None else None
-        return b
