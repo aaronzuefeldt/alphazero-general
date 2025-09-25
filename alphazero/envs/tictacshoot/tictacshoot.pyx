@@ -33,82 +33,380 @@ cdef tuple DIRECTIONS = (
 # -----------------------------------------------------------------------------
 # C-level Board implementation for performance
 # -----------------------------------------------------------------------------
+
 cdef class Board:
     """
-    Cython implementation of the TicTacShoot board logic.
+    Custom Tic-Tac-Toe (with spin/shoot/slide) board logic in Cython-friendly Python.
+
+    Action space (for n=3): 72 placement actions (8 rotations × 9 squares)
+    plus 3 special actions: 72=SPIN, 73=SHOOT, 74=END_TURN.
     """
-    cdef public int n
-    cdef public np.ndarray pieces, has_shield_states, rotations
-    cdef public int turn_number, actions_left
-    cdef public bint has_placed, token_active
-    cdef public object last_placed
-    cdef public int token_row, token_column
+
+    # rotation index -> (dr, dc)
+    DIRECTIONS = [
+        (0, 1),   # 0: Right (→)
+        (1, 1),   # 1: Down-Right (↘)
+        (1, 0),   # 2: Down (↓)
+        (1, -1),  # 3: Down-Left (↙)
+        (0, -1),  # 4: Left (←)
+        (-1, -1), # 5: Up-Left (↖)
+        (-1, 0),  # 6: Up (↑)
+        (-1, 1)   # 7: Up-Right (↗)
+    ]
 
     def __cinit__(self, int n=3):
         self.n = n
-        self.pieces = np.zeros((n, n), dtype=np.intp)
-        self.has_shield_states = np.zeros((n, n), dtype=np.intp)
-        self.rotations = np.zeros((n, n), dtype=np.intp)
-        cdef int token_index = 7
+
+        # Piece grid: 1 for Player O, -1 for Player X, 0 empty
+        self.pieces = np.zeros((n, n), dtype=np.int32)
+
+        # Rotations per cell (0..7) where a piece exists
+        self.rotations = np.zeros((n, n), dtype=np.int32)
+
+        # Shield presence per cell: 1 has shield, 0 no shield
+        self.has_shield_states = np.zeros((n, n), dtype=np.int32)
+
+        # Special token starts at (2,1) as -1 piece, active at game start
+        token_index = 7  # 0..8 for n=3 -> (2,1)
         self.token_row, self.token_column = divmod(token_index, n)
         self.pieces[self.token_row, self.token_column] = -1
+        self.token_active = True
+
+        # Turn / action state
         self.turn_number = 0
         self.actions_left = 2
         self.has_placed = False
-        self.last_placed = None
-        self.token_active = True
+        self.last_placed = None  # (r,c) or None
 
-    def __reduce__(self):
-        return (Board, (self.n,), self.__getstate__())
+    # ---------------------- Rules / API ----------------------
+    def get_legal_moves(self, int player):
+        """
+        Returns list[int] of all legal moves:
+        - 0..(8*n*n - 1): placement p*(n*n) + (r*n + c)
+        - 8*n*n:     SPIN  (rot +1 mod 8)  [costs 1 action]
+        - 8*n*n + 1: SHOOT (project rays)  [costs 1 action]
+        - 8*n*n + 2: END_TURN (switches player) — allowed if placed or board is full
+        """
+        moves = []
+        n = self.n
+        SPECIAL_BASE = 8 * n * n
 
-    def __getstate__(self):
-        return (self.n, self.pieces, self.has_shield_states, self.rotations,
-                self.turn_number, self.actions_left, self.has_placed,
-                self.last_placed, self.token_active, self.token_row, self.token_column)
-
-    def __setstate__(self, state):
-        (self.n, self.pieces, self.has_shield_states, self.rotations,
-         self.turn_number, self.actions_left, self.has_placed,
-         self.last_placed, self.token_active, self.token_row, self.token_column) = state
-
-    cpdef Board clone(self):
-        cdef Board new_board = Board(self.n)
-        new_board.pieces = np.copy(self.pieces)
-        new_board.has_shield_states = np.copy(self.has_shield_states)
-        new_board.rotations = np.copy(self.rotations)
-        new_board.turn_number = self.turn_number
-        new_board.actions_left = self.actions_left
-        new_board.has_placed = self.has_placed
-        new_board.last_placed = self.last_placed
-        new_board.token_active = self.token_active
-        new_board.token_row = self.token_row
-        new_board.token_column = self.token_column
-        return new_board
-
-    # ... other Board methods like get_legal_moves, check_win, execute_move ...
-    cpdef list get_legal_moves(self, int player):
-        cdef list moves = []
-        cdef int p, r, c
-        cdef int SPECIAL_BASE = 8 * self.n * self.n
+        # 1) Placement (only if not already placed this turn)
         if not self.has_placed:
             for p in range(8):
-                for r in range(self.n):
-                    for c in range(self.n):
+                for r in range(n):
+                    for c in range(n):
                         if self.pieces[r, c] == 0:
-                            moves.append(p * (self.n * self.n) + (r * self.n + c))
+                            moves.append(p * (n * n) + (r * n + c))
+
+        # 2) AP-gated actions
         if self.actions_left > 0:
+            # SPIN possible if there's at least one non-token piece (or token inactive)
             if np.count_nonzero(self.pieces) > 1 or (np.count_nonzero(self.pieces) == 1 and not self.token_active):
-                moves.append(SPECIAL_BASE)
+                moves.append(SPECIAL_BASE)  # SPIN
+
+            # SHOOT if there is any valid target along any shooter's ray
             if self._has_valid_targets(player):
-                moves.append(SPECIAL_BASE + 1)
-        if self.has_placed or np.count_nonzero(self.pieces) == self.n * self.n:
+                moves.append(SPECIAL_BASE + 1)  # SHOOT
+
+        # 3) Always allow END_TURN after placing or if board is full
+        if self.has_placed or np.count_nonzero(self.pieces) == n * n:
             moves.append(SPECIAL_BASE + 2)
+
         return moves
-    cdef bint _has_valid_targets(self, int player): return False # dummy
-    cpdef int check_win(self, int win_len=3): return 0 # dummy
-    cpdef void execute_move(self, int move_idx, int player): pass # dummy
-    cdef void shoot(self, int player): pass # dummy
-    cdef bint _in_bounds(self, int r, int c): return 0 <= r < self.n and 0 <= c < self.n
+
+    def _has_valid_targets(self, int player):
+        n = self.n
+        for r0 in range(n):
+            for c0 in range(n):
+                if self.pieces[r0, c0] == player and self.last_placed != (r0, c0):
+                    # Active token cannot shoot
+                    if self.token_active and r0 == self.token_row and c0 == self.token_column:
+                        continue
+                    dir_idx = int(self.rotations[r0, c0])
+                    dr, dc = self.DIRECTIONS[dir_idx]
+                    r, c = r0 + dr, c0 + dc
+                    while self._in_bounds(r, c):
+                        if self.pieces[r, c] != 0:
+                            return True
+                        r += dr; c += dc
+        return False
+
+    def check_win(self, int win_len=3):
+        """
+        Standard k-in-a-row check for either player.
+        Returns  1 if Player O wins,
+                -1 if Player X wins,
+                 0 otherwise.
+        """
+        board = self.pieces
+        m, n = board.shape
+        k = int(win_len)
+        if k <= 0:
+            raise ValueError("win_len must be positive")
+        if k > max(m, n):
+            return 0
+
+        def has_k(player):
+            # Horizontal
+            for r in range(m):
+                cnt = 0
+                for c in range(n):
+                    cnt = cnt + 1 if board[r, c] == player else 0
+                    if cnt >= k: return True
+
+            # Vertical
+            for c in range(n):
+                cnt = 0
+                for r in range(m):
+                    cnt = cnt + 1 if board[r, c] == player else 0
+                    if cnt >= k: return True
+
+            # Diagonal down-right (↘)
+            for r0 in range(m):
+                r, c = r0, 0
+                cnt = 0
+                while r < m and c < n:
+                    cnt = cnt + 1 if board[r, c] == player else 0
+                    if cnt >= k: return True
+                    r += 1; c += 1
+            for c0 in range(1, n):
+                r, c = 0, c0
+                cnt = 0
+                while r < m and c < n:
+                    cnt = cnt + 1 if board[r, c] == player else 0
+                    if cnt >= k: return True
+                    r += 1; c += 1
+
+            # Diagonal down-left (↙)
+            for r0 in range(m):
+                r, c = r0, n - 1
+                cnt = 0
+                while r < m and c >= 0:
+                    cnt = cnt + 1 if board[r, c] == player else 0
+                    if cnt >= k: return True
+                    r += 1; c -= 1
+            for c0 in range(n - 2, -1, -1):
+                r, c = 0, c0
+                cnt = 0
+                while r < m and c >= 0:
+                    cnt = cnt + 1 if board[r, c] == player else 0
+                    if cnt >= k: return True
+                    r += 1; c -= 1
+
+            return False
+
+        for p in (1, -1):
+            if has_k(p): return p
+        return 0
+
+    def execute_move(self, int move_idx, int player):
+        """
+        Apply a move:
+        - Placement encodes rotation + cell
+        - Special actions: SPIN, SHOOT, END_TURN
+        """
+        n = self.n
+        SPECIAL_BASE = 8 * n * n
+
+        if 0 <= move_idx < SPECIAL_BASE:
+            # PLACE
+            p, mod = divmod(move_idx, n * n)
+            r, c = divmod(mod, n)
+            if self.pieces[r, c] != 0 or self.has_placed:
+                raise AssertionError("Illegal placement")
+            self.pieces[r, c] = player
+            self.has_shield_states[r, c] = 1   # new piece spawns with shield
+            self.rotations[r, c] = p
+            self.has_placed = True
+            self.last_placed = (r, c)
+            return
+
+        if move_idx == SPECIAL_BASE:
+            # SPIN (rot +1) — costs 1 AP
+            if self.actions_left <= 0:
+                raise AssertionError("No actions left for SPIN")
+            self.rotations = (self.rotations + 1) % 8
+            self.actions_left -= 1
+            return
+
+        if move_idx == SPECIAL_BASE + 1:
+            # SHOOT — costs 1 AP
+            if self.actions_left <= 0:
+                raise AssertionError("No actions left for SHOOT")
+            self.shoot(player)
+            self.actions_left -= 1
+            return
+
+        # END_TURN
+        self.turn_number += 1
+        self.actions_left = 2
+        self.has_placed = False
+        self.last_placed = None
+
+    def shoot(self, int player):
+        """
+        Fire rays from all of `player`'s pieces (except the most recently placed
+        and the active special token). First non-empty cell along each ray is a hit.
+        If a hit piece has no shield, it is removed. If it has a shield, it slides.
+        """
+        if self.actions_left <= 0:
+            return
+
+        n = self.n
+
+        # 1) Collect first hits per ray
+        hits = {}  # (r,c) -> dir_idx that hit it
+        for r0 in range(n):
+            for c0 in range(n):
+                if self.pieces[r0, c0] == player and self.last_placed != (r0, c0):
+                    # Token cannot shoot while active
+                    if self.token_active and r0 == self.token_row and c0 == self.token_column:
+                        continue
+                    dir_idx = int(self.rotations[r0, c0])
+                    dr, dc = self.DIRECTIONS[dir_idx]
+                    r, c = r0 + dr, c0 + dc
+                    while self._in_bounds(r, c):
+                        if self.pieces[r, c] != 0:
+                            # keep first shooter direction only
+                            hits.setdefault((r, c), dir_idx)
+                            break
+                        r += dr; c += dc
+
+        if not hits:
+            return
+
+        # 2) Partition: die (no shield) vs slide (has shield)
+        will_die = set()
+        will_slide = {}  # (r,c) -> dir_idx
+        for (r, c), dir_idx in hits.items():
+            if self.has_shield_states[r, c] == 0:
+                will_die.add((r, c))
+            else:
+                will_slide[(r, c)] = dir_idx
+
+        # 2b) Deactivate token if it gets destroyed
+        if (self.token_row, self.token_column) in will_die:
+            self.token_active = False
+
+        # 3) Plan slide destinations per target
+        slide_targets = {}  # dest_idx -> list[[origin_idx, prev_idx, dist], ...]
+
+        def rc_to_idx(r, c): return r * n + c
+        def idx_to_rc(idx): return divmod(idx, n)
+
+        def plan_slide_from(rc, hit_dir_idx):
+            r0, c0 = rc
+            origin_idx = rc_to_idx(r0, c0)
+
+            # Map the hit direction to a screen-space vector (x, y) for rotation logic
+            dr, dc = self.DIRECTIONS[hit_dir_idx]
+            slide_vec = [dc, -dr]  # (x, y) with inverted y to mimic C# coords
+
+            # Up to 3 attempts: original, +90°, +180° (cumulative from +90°)
+            for attempt in range(3):
+                if attempt == 1:
+                    # +90° clockwise
+                    slide_vec = [slide_vec[1], -slide_vec[0]]
+                elif attempt == 2:
+                    # +180° from previous (+270° total from original)
+                    slide_vec = [-slide_vec[0], -slide_vec[1]]
+
+                j = 1
+                while j < n:
+                    rr = r0 + (-slide_vec[1]) * j
+                    cc = c0 + slide_vec[0] * j
+
+                    # Blocked by board or by a non-dying piece
+                    if (not self._in_bounds(rr, cc) or
+                        (self.pieces[rr, cc] != 0 and (rr, cc) not in will_die)):
+                        if j > 1:
+                            rr2 = r0 + (-slide_vec[1]) * (j - 1)
+                            cc2 = c0 + slide_vec[0] * (j - 1)
+                            rr3 = r0 + (-slide_vec[1]) * (j - 2)
+                            cc3 = c0 + slide_vec[0] * (j - 2)
+                            dest_idx = rc_to_idx(int(rr2), int(cc2))
+                            prev_idx = rc_to_idx(int(rr3), int(cc3))
+                            slide_targets.setdefault(dest_idx, []).append([origin_idx, prev_idx, j])
+                            return dest_idx
+                        else:
+                            # immediate block — try next rotation attempt
+                            break
+                    else:
+                        j += 1
+
+            # No valid slide — stay; shield still consumed
+            slide_targets.setdefault(origin_idx, []).append([origin_idx, origin_idx, 0])
+            return origin_idx
+
+        for rc, d in will_slide.items():
+            plan_slide_from(rc, d)
+
+        # 4) Resolve overlapping destinations with backoff/tie rules
+        max_iters = n * n
+        it = 0
+        while it < max_iters:
+            it += 1
+            overlaps = 0
+            for dest_idx, contenders in list(slide_targets.items()):
+                if len(contenders) > 1:
+                    overlaps += 1
+                    contenders.sort(key=lambda x: x[2])  # by distance asc
+                    if len(contenders) >= 2 and contenders[0][2] == contenders[1][2]:
+                        # Tie: all back off one step
+                        for origin_idx, prev_idx, dist in contenders:
+                            if dist > 0:
+                                new_dest = prev_idx
+                                step = dest_idx - prev_idx
+                                new_prev = prev_idx - step
+                                slide_targets.setdefault(new_dest, []).append([origin_idx, new_prev, dist - 1])
+                            else:
+                                slide_targets.setdefault(origin_idx, []).append([origin_idx, origin_idx, 0])
+                        slide_targets[dest_idx] = []
+                    else:
+                        # Winner stays (closest). Others back off one.
+                        winner = contenders[0]
+                        losers = contenders[1:]
+                        slide_targets[dest_idx] = [winner]
+                        for origin_idx, prev_idx, dist in losers:
+                            if dist > 0:
+                                new_dest = prev_idx
+                                step = dest_idx - prev_idx
+                                new_prev = prev_idx - step
+                                slide_targets.setdefault(new_dest, []).append([origin_idx, new_prev, dist - 1])
+                            else:
+                                slide_targets.setdefault(origin_idx, []).append([origin_idx, origin_idx, 0])
+            if overlaps == 0:
+                break
+
+        # 5) Apply removals
+        for (r, c) in will_die:
+            self.pieces[r, c] = 0
+            self.rotations[r, c] = 0
+            self.has_shield_states[r, c] = 0
+
+        # 6) Apply slides (move piece & consume shield)
+        for dest_idx, contenders in slide_targets.items():
+            if len(contenders) != 1:
+                continue
+            origin_idx, prev_idx, dist = contenders[0]
+            if dest_idx == origin_idx:
+                r0, c0 = idx_to_rc(origin_idx)
+                self.has_shield_states[r0, c0] = 0
+                continue
+
+            orr, occ = idx_to_rc(origin_idx)
+            drr, dcc = idx_to_rc(dest_idx)
+            self.pieces[drr, dcc] = self.pieces[orr, occ]
+            self.rotations[drr, dcc] = self.rotations[orr, occ]
+            self.has_shield_states[drr, dcc] = 0  # shield consumed
+            self.pieces[orr, occ] = 0
+            self.rotations[orr, occ] = 0
+            self.has_shield_states[orr, occ] = 0
+
+    # ---------------------- Helpers ----------------------
+    def _in_bounds(self, int r, int c):
+        return 0 <= r < self.n and 0 <= c < self.n
 
 
 # -----------------------------------------------------------------------------
