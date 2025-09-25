@@ -203,7 +203,7 @@ cdef class Board:
                     rr += 1; cc -= 1
         return 0
 
-    cpdef void execute_move(self, int move_idx, int player):(self, int move_idx, int player):
+    cpdef void execute_move(self, int move_idx, int player):
         cdef int SPECIAL_BASE = 8 * self.n * self.n
         if 0 <= move_idx < SPECIAL_BASE:
             # PLACE: move encodes orientation p and square (r,c)
