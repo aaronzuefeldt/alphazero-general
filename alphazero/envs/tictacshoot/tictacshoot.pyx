@@ -47,10 +47,10 @@ cdef class Board:
 
     def __cinit__(self, int n=3):
         self.n = n
-        # FIX: Ensure arrays are created with the correct C-level dtype
-        self.pieces = np.zeros((n, n), dtype=DTYPE_INT_t)
-        self.has_shield_states = np.zeros((n, n), dtype=DTYPE_INT_t)
-        self.rotations = np.zeros((n, n), dtype=DTYPE_INT_t)
+        # FIX: Use the corresponding NumPy dtype object (np.intp) when calling np.zeros
+        self.pieces = np.zeros((n, n), dtype=np.intp)
+        self.has_shield_states = np.zeros((n, n), dtype=np.intp)
+        self.rotations = np.zeros((n, n), dtype=np.intp)
         
         cdef int token_index = 7
         self.token_row, self.token_column = divmod(token_index, n)
@@ -166,8 +166,7 @@ cdef class Board:
             self.last_placed = None
 
     cdef void shoot(self, int player):
-        # NOTE: shoot logic is complex and omitted for brevity, but it goes here
-        pass
+        pass # NOTE: shoot logic is complex and omitted for brevity
 
     cdef bint _in_bounds(self, int r, int c):
         return 0 <= r < self.n and 0 <= c < self.n
@@ -182,11 +181,9 @@ class Game(GameState):
     """
     def __init__(self, _board: Board | None = None, n: int = BOARD_SIZE):
         self._n = int(n if _board is None else _board.n)
-        # The `_board` attribute is now an instance of our cdef class
         super().__init__(_board or Board(self._n))
 
     def __eq__(self, other: object) -> bool:
-        """Checks if two game states are equal."""
         if not isinstance(other, Game):
             return NotImplemented
 
@@ -221,21 +218,17 @@ class Game(GameState):
         return 1 if self.player == 0 else -1
 
     def valid_moves(self) -> np.ndarray:
-        """Return a fixed-size binary vector over the full action space."""
         valids = np.zeros(self.action_size(self._n), dtype=np.uint8)
-        # Delegate the call to the fast _board object
         legal_moves = self._board.get_legal_moves(self._player_val())
         for move in legal_moves:
             valids[move] = 1
         return valids
 
     def play_action(self, action: int) -> None:
-        """Apply the action and advance the turn."""
         self._board.execute_move(action, self._player_val())
         self._update_turn()
 
     def win_state(self) -> np.ndarray:
-        """Returns [p0_wins, p1_wins, draw]"""
         result = np.zeros(NUM_PLAYERS + 1, dtype=np.uint8)
         winner = self._board.check_win()
         if winner != 0:
@@ -248,11 +241,9 @@ class Game(GameState):
         return result
 
     def observation(self) -> np.ndarray:
-        """Return CxHxW planes representing the state."""
         return _encode_board(self._board)
 
     def clone(self) -> 'Game':
-        """Create a deep copy of the game state."""
         cloned_game = Game(n=self._n)
         cloned_game._board = self._board.clone()
         cloned_game._player = self.player
