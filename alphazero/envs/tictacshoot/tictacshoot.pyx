@@ -128,10 +128,80 @@ cdef class Board:
         cdef int m = self.n
         cdef int n = self.n
         cdef int k = win_len
+        cdef int player, r, c, count, r0, c0, rr, cc
         if k <= 0:
             raise ValueError("win_len must be a positive integer.")
         if k > m and k > n:
             return 0
+
+        for player in (1, -1):
+            # Horizontal
+            for r in range(m):
+                count = 0
+                for c in range(n):
+                    if self.pieces[r, c] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+            # Vertical
+            for c in range(n):
+                count = 0
+                for r in range(m):
+                    if self.pieces[r, c] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+            # Diagonal ↘ (down-right)
+            for r0 in range(m):
+                rr, cc = r0, 0
+                count = 0
+                while rr < m and cc < n:
+                    if self.pieces[rr, cc] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+                    rr += 1; cc += 1
+            for c0 in range(1, n):
+                rr, cc = 0, c0
+                count = 0
+                while rr < m and cc < n:
+                    if self.pieces[rr, cc] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+                    rr += 1; cc += 1
+            # Diagonal ↙ (down-left)
+            for r0 in range(m):
+                rr, cc = r0, n - 1
+                count = 0
+                while rr < m and cc >= 0:
+                    if self.pieces[rr, cc] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+                    rr += 1; cc -= 1
+            for c0 in range(n - 2, -1, -1):
+                rr, cc = 0, c0
+                count = 0
+                while rr < m and cc >= 0:
+                    if self.pieces[rr, cc] == player:
+                        count += 1
+                        if count >= k:
+                            return player
+                    else:
+                        count = 0
+                    rr += 1; cc -= 1
+        return 0
 
         cdef int player
         for player in (1, -1):
@@ -454,10 +524,9 @@ class Game(GameState):
         """
         Generates symmetric game states and policies via board rotations.
         """
-        cdef int n = self._n
-        cdef int ACTION_SIZE = self.action_size(n)
-        cdef int SPECIAL_BASE = 8 * n * n
-        cdef int k, p_ori, r, c, rr, cc, p_new, idx, idx_new
+        n = self._n
+        ACTION_SIZE = self.action_size(n)
+        SPECIAL_BASE = 8 * n * n
 
         # Get current state and policy as numpy arrays
         board_state = self.observation()
@@ -489,7 +558,7 @@ class Game(GameState):
                     for c in range(n):
                         # Original action index
                         idx = p_ori * (n*n) + r*n + c
-                        
+
                         # New coordinates after board rotation
                         rr, cc = r, c
                         if k == 1: rr, cc = c, n - 1 - r      # 90 deg
@@ -498,11 +567,11 @@ class Game(GameState):
 
                         # New piece orientation after board rotation
                         p_new = (p_ori + 2*k) % 8
-                        
+
                         # New action index
                         idx_new = p_new * (n*n) + rr*n + cc
                         pi_rot[idx_new] = pi_arr[idx]
-            
+
             # b. Special actions are not position-dependent
             pi_rot[SPECIAL_BASE:ACTION_SIZE] = pi_arr[SPECIAL_BASE:ACTION_SIZE]
 
@@ -511,9 +580,9 @@ class Game(GameState):
             new_game._board = _decode_board(b_rot_state, n)
             new_game._player = self.player # Turn does not change with symmetry
             new_game._turns = self.turns
-            
+
             syms.append((new_game, pi_rot))
-            
+
         return syms
 
 # -----------------------------------------------------------------------------
