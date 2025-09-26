@@ -1,61 +1,62 @@
 {
-  "run_name": "tictacshoot",
+  "run_name": "tictacshoot_bf75",
   "cuda": true,
   "workers": 12,
 
   "startIter": 0,
-  "numIters": 1200,
+  "numIters": 1000,
 
-  "process_batch_size": 512,
+  "process_batch_size": 256,
   "train_batch_size": 2048,
   "arena_batch_size": 128,
 
-  "train_steps_per_iteration": 64,
+  "train_steps_per_iteration": 128,
   "train_sample_ratio": 1,
   "averageTrainSteps": false,
   "autoTrainSteps": true,
 
-  "train_on_past_data": true,
-  "past_data_chunk_size": 50,
-  "past_data_run_name": "tictacshoot",
+  "train_on_past_data": false,
+  "past_data_chunk_size": 25,
+  "past_data_run_name": "tictacshoot_bf75",
 
-  "gamesPerIteration": 6144,
+  "gamesPerIteration": 8192,
 
-  "minTrainHistoryWindow": 6,
-  "maxTrainHistoryWindow": 24,
-  "trainHistoryIncrementIters": 2,
+  "minTrainHistoryWindow": 8,
+  "maxTrainHistoryWindow": 40,
+  "trainHistoryIncrementIters": 1,
 
   "min_discount": 1,
-  "fpu_reduction": 0.4,
 
-  "num_stacked_observations": 6,
+  "fpu_reduction": 0.6,
 
-  "numWarmupIters": 1,
+  "num_stacked_observations": 8,
+
+  "numWarmupIters": 2,
+
   "skipSelfPlayIters": null,
   "selfPlayModelIter": null,
+
   "symmetricSamples": true,
 
   "numMCTSSims": 400,
-  "numFastSims": 0,
+  "numFastSims": 50,
   "numWarmupSims": 10,
-  "probFastSim": 0.0,
+  "probFastSim": 0.6,
 
   "mctsResetThreshold": null,
 
-  "startTemp": 1.0,
+  "startTemp": 1.1,
   "temp_scaling_fn": "__CALLABLE__default_temp_scaling",
-  "root_policy_temp": 1.3,
+  "root_policy_temp": 1.0,
   "root_noise_frac": 0.25,
   "add_root_noise": true,
   "add_root_temp": true,
 
-  "dirichlet_alpha": 0.15,
-
   "compareWithBaseline": true,
   "baselineTester": "__CALLABLE__RawMCTSPlayer",
   "arenaCompareBaseline": 128,
-  "arenaCompare": 160,
-  "arenaTemp": 0.1,
+  "arenaCompare": 200,
+  "arenaTemp": 0.25,
   "arenaMCTS": true,
   "arenaBatched": true,
   "baselineCompareFreq": 1,
@@ -63,24 +64,25 @@
   "compareWithPast": true,
   "pastCompareFreq": 1,
   "model_gating": true,
-  "max_gating_iters": null,
+  "max_gating_iters": 8,
   "min_next_model_winrate": 0.55,
   "use_draws_for_winrate": true,
 
   "load_model": true,
-  "cpuct": 2.0,
 
-  "value_loss_weight": 1.5,
+  "cpuct": 2.75,
+
+  "value_loss_weight": 1.25,
 
   "checkpoint": "checkpoint",
   "data": "data",
 
   "scheduler": "__CALLABLE__MultiStepLR",
-  "scheduler_args": { "milestones": [100, 200], "gamma": 0.2 },
+  "scheduler_args": { "milestones": [200, 600], "gamma": 0.5 },
+  "lr": 0.01,
 
-  "lr": 0.003,
-  "optimizer": "__CALLABLE__AdamW",
-  "optimizer_args": { "weight_decay": 0.01 },
+  "optimizer": "__CALLABLE__SGD",
+  "optimizer_args": { "momentum": 0.9, "weight_decay": 0.0001 },
 
   "nnet_type": "resnet",
   "num_channels": 64,
@@ -90,5 +92,5 @@
 
   "input_fc_layers": [256, 256],
   "value_dense_layers": [256, 64],
-  "policy_dense_layers": [256, 128]
+  "policy_dense_layers": [512, 256]
 }
