@@ -26,6 +26,12 @@ class RandomTicTacToePlayer(BasePlayer):
 
     API: play(self, state: GameState) -> int
     """
+    def __init__(self, *args, **kwargs):
+        try:
+            super().__init__(*args, **kwargs)
+        except Exception:
+            pass
+
     def play(self, state: GameState) -> int:
         valids = list(state.valid_moves())
         choices = [i for i, ok in enumerate(valids) if ok]
@@ -53,7 +59,11 @@ class HumanTicTacToePlayer(BasePlayer):
       • A raw numeric action index
     """
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        try:
+            super().__init__(*args, **kwargs)
+        except Exception:
+            pass
         # Will be derived per-state when play() is called
         self.n: Optional[int] = None
         self.place_space: Optional[int] = None
