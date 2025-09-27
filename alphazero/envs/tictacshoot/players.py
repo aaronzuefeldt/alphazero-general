@@ -27,17 +27,19 @@ class RandomTicTacToePlayer(BasePlayer):
     API: play(self, state: GameState) -> int
     """
     def __init__(self, *args, **kwargs):
-        # Accept any extra args the GUI provides
-        try:
-            super().__init__(*args, **kwargs)
-        except Exception:
-            pass
-        # Provide attributes the GUI expects
+        # Do NOT call BasePlayer.__init__ — the GUI is using these as lightweight players
+        # and BasePlayer.__init__ tries to spin up MCTS with args we don't have.
         self.name = kwargs.get("name", self.__class__.__name__)
-        # Win/loss tracking placeholders; GUI/arena may update these
         self.wins = 0
         self.games = 0
         self.winrate = 0.0
+        # Keep a reference to any args for debugging; not required by GUI
+        self._raw_init_args = args
+        self._raw_init_kwargs = kwargs
+
+    def reset(self):
+        # No-op: provided to match BasePlayer signature the GUI may call
+        return
 
     def play(self, state: GameState) -> int:
         valids = list(state.valid_moves())
@@ -67,17 +69,19 @@ class HumanTicTacToePlayer(BasePlayer):
     """
 
     def __init__(self, *args, **kwargs):
-        # Accept any extra args the GUI provides
-        try:
-            super().__init__(*args, **kwargs)
-        except Exception:
-            pass
-        # Provide attributes the GUI expects
+        # Do NOT call BasePlayer.__init__ — the GUI is using these as lightweight players
+        # and BasePlayer.__init__ tries to spin up MCTS with args we don't have.
         self.name = kwargs.get("name", self.__class__.__name__)
-        # Win/loss tracking placeholders; GUI/arena may update these
         self.wins = 0
         self.games = 0
         self.winrate = 0.0
+        # Keep a reference to any args for debugging; not required by GUI
+        self._raw_init_args = args
+        self._raw_init_kwargs = kwargs
+
+    def reset(self):
+        # No-op: provided to match BasePlayer signature the GUI may call
+        return
         # Will be derived per-state when play() is called
         self.n: Optional[int] = None
         self.place_space: Optional[int] = None
