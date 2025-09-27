@@ -42,11 +42,55 @@ class RandomTicTacToePlayer(BasePlayer):
         self.winrate = 0.0
         self._raw_init_args = args
         self._raw_init_kwargs = kwargs
+        self.symbols = {
+            0: "⬜", # Empty
+            1: ["\u21E8", "\u2B02", "\u21E9", "\u2B03", "\u21E6", "\u2B01", "\u21E7", "\u2B00"], # Player O
+           -1: ["\u2192", "\u2198", "\u2193", "\u2199", "\u2190", "\u2196", "\u2191", "\u2197"]  # Player X
+        }
 
     def reset(self):  # optional hook some GUIs call
         return
 
+
+    # ----------------------------
+    # Display helper
+    # ----------------------------
+    def display(self, state: GameState):
+        """Pretty-print the current board, turn info, and shields."""
+        b = getattr(state, "_board", None)
+        if b is None:
+            return
+        n = int(getattr(b, "n", 3))
+
+        player_char = "O" if b.turn_number % 2 == 0 else "X"
+        print("-" * (6 * n))
+        print(f"Turn: {b.turn_number} | Player: {player_char} | Actions Left: {b.actions_left} | Placed: {b.has_placed}")
+
+        for r in range(n):
+            if r > 0:
+                print("-" * (6 * n))
+            print(" | ", end="")
+            for c in range(n):
+                piece = int(b.pieces[r, c])
+                # Special display for the active C++ 'token'
+                if getattr(b, "token_active", False) and r == int(b.token_row) and c == int(b.token_column):
+                    symbol = " x "
+                elif piece != 0:
+                    rot = int(b.rotations[r, c]) % 8
+                    try:
+                        symbol = self.symbols[piece][rot]
+                    except Exception:
+                        symbol = " ? "
+                    if int(b.has_shield_states[r, c]) == 1:
+                        symbol = f"({symbol})"
+                else:
+                    symbol = self.symbols[0]
+                print(f"{symbol:^3} | ", end="")
+            print()
+        print("-" * (6 * n))
+
     def play(self, state: GameState) -> int:
+        self.display(state)
         valids = list(state.valid_moves())
         choices = [i for i, ok in enumerate(valids) if ok]
         if not choices:
