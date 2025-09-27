@@ -1,67 +1,63 @@
-# Updated players that match the "regular" TicTacToe API
-# (BasePlayer with play(self, state: GameState) -> int and state.valid_moves())
-#
-# This adapts your custom interface to work where the standard game expects
-# alphazero.GenericPlayers.BasePlayer subclasses that consume a GameState.
-#
-# It preserves the nicer human input parsing you wrote (place r c rot / spin / shoot / end),
-# but falls back gracefully if those actions aren't part of the current game's action space.
+"""
+players.py (TicTacToe env)
+
+Drop this file at:  ENVS_DIR/<your_tictactoe_env>/players.py
+The GUI will import it via PLAYERS_MODULE automatically.
+
+Implements two players that match the "regular" API:
+  - class HumanTicTacToePlayer(BasePlayer)
+  - class RandomTicTacToePlayer(BasePlayer)
+
+Key notes:
+  • No call to BasePlayer.__init__ (avoids spinning up MCTS).
+  • Provides GUI-friendly attrs: name, wins, games, winrate.
+  • Implements a no-op reset(self) to satisfy code paths that expect it.
+  • play(self, state) returns a single valid integer action index from state.valid_moves().
+"""
 
 from typing import Optional, Tuple
 import math
 import random
 
-try:
-    from alphazero.GenericPlayers import BasePlayer
-    from alphazero.Game import GameState
-except Exception:  # soft fallback for type checkers or alt envs
-    class BasePlayer:  # type: ignore
-        pass
-    class GameState:  # type: ignore
-        pass
+from alphazero.GenericPlayers import BasePlayer  # keep the base type for compatibility
+from alphazero.Game import GameState
+
+__all__ = [
+    "HumanTicTacToePlayer",
+    "RandomTicTacToePlayer",
+]
 
 
 class RandomTicTacToePlayer(BasePlayer):
-    """A player that chooses any currently valid action at random.
+    """Chooses a currently valid action uniformly at random."""
 
-    API: play(self, state: GameState) -> int
-    """
     def __init__(self, *args, **kwargs):
-        # Do NOT call BasePlayer.__init__ — the GUI is using these as lightweight players
-        # and BasePlayer.__init__ tries to spin up MCTS with args we don't have.
+        # Do NOT call BasePlayer.__init__ (it tries to spin up MCTS).
         self.name = kwargs.get("name", self.__class__.__name__)
         self.wins = 0
         self.games = 0
         self.winrate = 0.0
-        # Keep a reference to any args for debugging; not required by GUI
         self._raw_init_args = args
         self._raw_init_kwargs = kwargs
 
-    def reset(self):
-        # No-op: provided to match BasePlayer signature the GUI may call
+    def reset(self):  # optional hook some GUIs call
         return
 
     def play(self, state: GameState) -> int:
         valids = list(state.valid_moves())
         choices = [i for i, ok in enumerate(valids) if ok]
         if not choices:
-            # If no valid actions (should be rare), return a pass-like action if present,
-            # otherwise 0.
-            return len(valids) - 1 if valids else 0
+            return 0
         return random.choice(choices)
 
 
 class HumanTicTacToePlayer(BasePlayer):
     """Human-controlled player with intuitive text commands.
 
-    Works with the standard API (GameState + valid_moves()). If your game uses
-    an action space with special actions (e.g., spin / shoot / end turn) and
-    8 rotational placements, those are detected heuristically from the action size.
-
     Supported inputs (case-insensitive):
-      • "shoot"
-      • "spin"
-      • "end" / "end turn" / "pass"
+      • "shoot" (if present in the action space)
+      • "spin"  (if present)
+      • "end" / "end turn" / "pass" (if present)
       • "place r c rot"   (e.g., "place 1 0 7")
       • "place r,c,rot"   (e.g., "place 1,0,7")
       • "place (r,c,rot)" (e.g., "place (1,0,7)")
@@ -69,34 +65,27 @@ class HumanTicTacToePlayer(BasePlayer):
     """
 
     def __init__(self, *args, **kwargs):
-        # Do NOT call BasePlayer.__init__ — the GUI is using these as lightweight players
-        # and BasePlayer.__init__ tries to spin up MCTS with args we don't have.
+        # Do NOT call BasePlayer.__init__ (it tries to spin up MCTS).
         self.name = kwargs.get("name", self.__class__.__name__)
         self.wins = 0
         self.games = 0
         self.winrate = 0.0
-        # Keep a reference to any args for debugging; not required by GUI
-        self._raw_init_args = args
-        self._raw_init_kwargs = kwargs
 
-    def reset(self):
-        # No-op: provided to match BasePlayer signature the GUI may call
-        return
-        # Will be derived per-state when play() is called
+        # Derived per-state in play()
         self.n: Optional[int] = None
         self.place_space: Optional[int] = None
         self.ACTION_SPIN: Optional[int] = None
         self.ACTION_SHOOT: Optional[int] = None
         self.ACTION_END_TURN: Optional[int] = None
-        self._dir_arrows = ["→", "↘", "↓", "↙", "←", "↖", "↑", "↗"]
+
+    def reset(self):  # optional hook some GUIs call
+        return
 
     # ----------------------------
     # Helpers for parsing commands
     # ----------------------------
     def _parse_place_triplet(self, s: str) -> Optional[Tuple[int, int, int]]:
-        """Return (r, c, rot) if s contains three ints; else None.
-        Accepts formats like: "1 0 7", "1,0,7", "(1,0,7)".
-        """
+        """Return (r, c, rot) if s contains three ints; else None."""
         if not isinstance(s, str):
             return None
         t = s.strip().lower()
@@ -121,7 +110,7 @@ class HumanTicTacToePlayer(BasePlayer):
         if not s:
             return None
 
-        # Direct keywords (only if these indices exist and are valid)
+        # Direct keywords (only if present and legal)
         for key, idx in (
             ("shoot", self.ACTION_SHOOT),
             ("spin", self.ACTION_SPIN),
@@ -177,8 +166,6 @@ class HumanTicTacToePlayer(BasePlayer):
 
         # If not available, guess n assuming 8 rotations × n*n placements + <= 3 specials
         if n is None:
-            # Probe for an n where 8*n*n <= action_size
-            # Prefer perfect squares close to action_size/8
             approx = max(1, int(round(math.sqrt(max(1, action_size / 8)))))
             candidates = {approx - 1, approx, approx + 1}
             candidates = [c for c in candidates if c > 0]
@@ -222,12 +209,10 @@ class HumanTicTacToePlayer(BasePlayer):
             print(f"[shoot] Shoot (idx {self.ACTION_SHOOT})")
         if self.ACTION_END_TURN is not None and self.ACTION_END_TURN < action_size and valids[self.ACTION_END_TURN]:
             print(f"[end]   End Turn (idx {self.ACTION_END_TURN})")
-
-        # Show a few example PLACE commands if the layout suggests rotations
         if self.place_space is not None and self.place_space <= action_size and self.n:
             print("Examples: place 1 0 7   |   place 1,0,7   |   place (1,0,7)")
 
-        # Input loop
+        # Input loop: keep asking until we get a currently-legal action index
         while True:
             try:
                 user_in = input("Enter action (e.g., 'shoot', 'spin', 'end', or 'place r c rot' or a number): ")
