@@ -430,7 +430,10 @@ class Game(GameState):
         return valids
     def play_action(self, action: int) -> None:
         self._board.execute_move(action, self._player_val())
-        self._update_turn()
+        SPECIAL_BASE = 8 * self._n * self._n
+        # Advance the turn (flip player) ONLY on END_TURN
+        if action == SPECIAL_BASE + 2:
+            self._update_turn()
     def win_state(self) -> np.ndarray:
         result = np.zeros(NUM_PLAYERS + 1, dtype=np.uint8)
         winner = self._board.check_win()

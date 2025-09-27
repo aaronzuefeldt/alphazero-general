@@ -241,6 +241,7 @@ class HumanTicTacToePlayer(BasePlayer):
     # Main API
     # ----------------------------
     def play(self, state: GameState) -> int:
+        self.display(state)
         # Ask the environment for the current valid action mask
         valids = list(state.valid_moves())
         action_size = len(valids)
