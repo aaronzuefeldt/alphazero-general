@@ -25,6 +25,9 @@ from alphazero.Game import GameState
 __all__ = [
     "HumanTicTacToePlayer",
     "RandomTicTacToePlayer",
+    # Aliases matching common GUI dropdown names
+    "HumanPlayer",
+    "RandomPlayer",
 ]
 
 
@@ -225,3 +228,11 @@ class HumanTicTacToePlayer(BasePlayer):
             if a is not None:
                 return a
             print("Couldn't understand or action not currently legal. Try again.")
+
+# ---
+# Aliases so the GUI finds these under common names like other games
+class HumanPlayer(HumanTicTacToePlayer):
+    pass
+
+class RandomPlayer(RandomTicTacToePlayer):
+    pass
