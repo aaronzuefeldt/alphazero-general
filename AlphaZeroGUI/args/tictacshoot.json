@@ -24,7 +24,8 @@
   "minTrainHistoryWindow": 8,
   "maxTrainHistoryWindow": 40,
   "trainHistoryIncrementIters": 1,
-
+  "max_moves": 512, 
+  "num_players": 2, 
   "min_discount": 1,
 
   "fpu_reduction": 0.6,
