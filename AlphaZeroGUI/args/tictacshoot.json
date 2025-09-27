@@ -26,6 +26,7 @@
   "trainHistoryIncrementIters": 1,
   "max_moves": 512, 
   "num_players": 2, 
+  "_num_players": 2, 
   "min_discount": 1,
 
   "fpu_reduction": 0.6,
