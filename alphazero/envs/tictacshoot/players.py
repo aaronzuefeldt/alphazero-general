@@ -1,12 +1,12 @@
 """
-players.py (TicTacToe env)
+players.py (TicTacShoot env)
 
-Drop this file at:  ENVS_DIR/<your_tictactoe_env>/players.py
+Drop this file at:  ENVS_DIR/<your_TicTacShoot_env>/players.py
 The GUI will import it via PLAYERS_MODULE automatically.
 
 Implements two players that match the "regular" API:
-  - class HumanTicTacToePlayer(BasePlayer)
-  - class RandomTicTacToePlayer(BasePlayer)
+  - class HumanTicTacShootPlayer(BasePlayer)
+  - class RandomTicTacShootPlayer(BasePlayer)
 
 Key notes:
   • No call to BasePlayer.__init__ (avoids spinning up MCTS).
@@ -23,15 +23,12 @@ from alphazero.GenericPlayers import BasePlayer  # keep the base type for compat
 from alphazero.Game import GameState
 
 __all__ = [
-    "HumanTicTacToePlayer",
-    "RandomTicTacToePlayer",
-    # Prefer these distinct names in GUI dropdowns to avoid clashes with generic classes
-    "TTTHumanPlayer",
-    "TTTRandomPlayer",
+    "HumanTicTacShootPlayer",
+    "RandomTicTacShootPlayer"
 ]
 
 
-class RandomTicTacToePlayer(BasePlayer):
+class RandomTicTacShootPlayer(BasePlayer):
     """Chooses a currently valid action uniformly at random."""
 
     def __init__(self, *args, **kwargs):
@@ -98,7 +95,7 @@ class RandomTicTacToePlayer(BasePlayer):
         return random.choice(choices)
 
 
-class HumanTicTacToePlayer(BasePlayer):
+class HumanTicTacShootPlayer(BasePlayer):
     """Human-controlled player with intuitive text commands.
 
     Supported inputs (case-insensitive):
@@ -221,7 +218,7 @@ class HumanTicTacToePlayer(BasePlayer):
                     n = c
                     break
             if n is None:
-                # fallback for classic TicTacToe (no rotations): try a perfect square
+                # fallback for classic TicTacShoot (no rotations): try a perfect square
                 root = int(round(math.sqrt(action_size)))
                 n = root if root * root <= action_size else max(1, root - 1)
 
@@ -241,7 +238,6 @@ class HumanTicTacToePlayer(BasePlayer):
     # Main API
     # ----------------------------
     def play(self, state: GameState) -> int:
-        self.display(state)
         # Ask the environment for the current valid action mask
         valids = list(state.valid_moves())
         action_size = len(valids)
@@ -273,10 +269,3 @@ class HumanTicTacToePlayer(BasePlayer):
             if a is not None:
                 return a
             print("Couldn't understand or action not currently legal. Try again.")
-
-# Distinct aliases to avoid colliding with generic RandomPlayer/HumanPlayer
-class TTTHumanPlayer(HumanTicTacToePlayer):
-    pass
-
-class TTTRandomPlayer(RandomTicTacToePlayer):
-    pass
