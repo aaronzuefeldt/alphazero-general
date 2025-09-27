@@ -27,10 +27,17 @@ class RandomTicTacToePlayer(BasePlayer):
     API: play(self, state: GameState) -> int
     """
     def __init__(self, *args, **kwargs):
+        # Accept any extra args the GUI provides
         try:
             super().__init__(*args, **kwargs)
         except Exception:
             pass
+        # Provide attributes the GUI expects
+        self.name = kwargs.get("name", self.__class__.__name__)
+        # Win/loss tracking placeholders; GUI/arena may update these
+        self.wins = 0
+        self.games = 0
+        self.winrate = 0.0
 
     def play(self, state: GameState) -> int:
         valids = list(state.valid_moves())
@@ -60,10 +67,17 @@ class HumanTicTacToePlayer(BasePlayer):
     """
 
     def __init__(self, *args, **kwargs):
+        # Accept any extra args the GUI provides
         try:
             super().__init__(*args, **kwargs)
         except Exception:
             pass
+        # Provide attributes the GUI expects
+        self.name = kwargs.get("name", self.__class__.__name__)
+        # Win/loss tracking placeholders; GUI/arena may update these
+        self.wins = 0
+        self.games = 0
+        self.winrate = 0.0
         # Will be derived per-state when play() is called
         self.n: Optional[int] = None
         self.place_space: Optional[int] = None
